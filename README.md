@@ -1,7 +1,7 @@
 ## PyRealSim
 - **Author:** LIU-Yinyi
-- **Date:** 2020-01-31
-- **Version:** 0.8.0
+- **Date:** 2020-02-05
+- **Version:** 0.9.0
 - **Abstract:** A quadcopter navigation simulator with built-in physics engine and sensor emulation including 6-DoF gyro and RGB-D camera based on Panda3D.
 
 ---
@@ -33,9 +33,20 @@ If everything goes well, you will see:
 ### 2. Interfaces
 You can use `Matlab` m-Files interface functions in `./api` directory. Type the instruction in matlab console with Enter, help and notes will display. Just follow the usages you can communicate with the `PyRealSim` through `UDP Protocol`. If something goes wrong, check if the port at `6666` and `6688` are occupied.
 
+```matlab
+sockfd = RNSim_Init()
+RNSim_Send(sockfd, cmd, dat)
+
+% @param sockfd: required from return value of RNSim_Init
+% @param cmd: (1)update (2)control
+% @param dat: [id, x, y, z, yaw]
+% @example: RNSim_Send(sockfd, 'control', [0, 1, 0, 1, 0]);
+%   which means: id = 0, set x = 1, y = 0, z = 1, yaw = 0 (Radian)
+```
+
 Other APIs are developing hitherto. Final release will be available at `version 1.x`.
 
-### 3. Problems
+### 3. Troubleshots
 But now I wonder how to understand the result of the depth image which is specified as CV_32FC1 format for each pixel. A ball was used to test the pixel value with respect to distance between the camera and the ball. Result was drawn below by Matlab where seemed a bit strange… The relationship between pixel-value and distance is not linear. I used tool to fit and the equation `y=a*x^b+c` where `a=-0.1016, b=-0.9952, c=1.01`. Also the parameters showed kind of relevance with camera lens.
 
 ![depth_curve](docs/depth_curve.png)
