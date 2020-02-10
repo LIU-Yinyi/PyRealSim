@@ -73,6 +73,8 @@ class RNSim(DirectObject):
         # ### Image Sensor Setup ### #
         self.flag_image_rgb = False
         self.flag_image_depth = False
+        self.img_rgb = None
+        self.img_depth = None
         self.setup_aero_fpv_camera()
 
         # ### Panda3D NodePath Render Setup ### #
@@ -84,7 +86,12 @@ class RNSim(DirectObject):
         # ### Network Setup ### #
         self.port = 6666
         self.ip = '127.0.0.1'
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock_send_img = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock_send_img.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock_send = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock_recv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.client_sock = None
+        self.client_addr = None
         self.setup_network(ip='127.0.0.1', port=6666)
 
         # ### Matplotlib Log ### #
@@ -102,6 +109,13 @@ class RNSim(DirectObject):
 
         # ### Periodic Task Manager Setup ### #
         base.taskMgr.add(self.sim_task, "sim_task")
+
+    def __del__(self):
+        if self.client_sock:
+            self.client_sock.close()
+        self.sock_recv.close()
+        self.sock_send.close()
+        self.sock_send_img.close()
 
     def enable_debug(self):
         # ### this mode is not available at PyCharm ### #
@@ -301,20 +315,43 @@ class RNSim(DirectObject):
                 self.port = val
         print(BLUE + '[Net] IP: {}, Port: {}.'.format(self.ip, self.port) + RESET)
 
-        self.sock.bind((self.ip, self.port))
+        self.sock_recv.bind((self.ip, self.port))
+        self.sock_send_img.bind(('0.0.0.0', self.port + 2))
+        self.sock_send_img.listen(2)
+
         try:
             _thread.start_new_thread(self.network_recv, ())
+            _thread.start_new_thread(self.network_image, ())
             print(GREEN + '[Net] Receive thread start success.' + RESET)
+            print(GREEN + '[Net] Image Stream thread start success.' + RESET)
         except:
             print(RED + '[Net] Receive thread start error.' + RESET)
 
-    def network_send(self, data):
-        pack = struct.pack('<6d', data[0], data[1], data[2], data[3], data[4], data[5])
-        self.sock.sendto(pack, (self.ip, self.port))
+    def network_image(self):
+        while True:
+            self.client_sock, self.client_addr = self.sock_send_img.accept()
+
+
+    def network_send(self, cmd, data):
+        if cmd == "state":
+            pack = struct.pack('<6d', *data)
+            self.sock_send.sendto(pack, (self.ip, self.port + 1))
+        elif cmd == "rgb":
+            fmt = str(data.size) + 'B'
+            seq = data.flatten()
+            pack = struct.pack('<'+fmt, *seq)
+            self.client_sock.send(pack)
+        elif cmd == "depth":
+            fmt = str(data.size) + 'f'
+            seq = data.flatten()
+            pack = struct.pack('<' + fmt, *seq)
+            self.client_sock.send(pack)
+        else:
+            return
 
     def network_recv(self):
         while True:
-            pack, addr = self.sock.recvfrom(struct.calcsize('<6d'))
+            pack, addr = self.sock_recv.recvfrom(struct.calcsize('<6d'))
             data = struct.unpack('<6d', pack)
             if data[0] == 1.0:
                 # ## Update ## #
@@ -335,6 +372,15 @@ class RNSim(DirectObject):
                              "Yaw={}{:.2f} deg{}".format(MAGENTA, self.quadcopter.expect_pos[0],
                                 self.quadcopter.expect_pos[1], self.quadcopter.expect_pos[2], BLUE, MAGENTA,
                                 self.quadcopter.expect_yaw[0], RESET))
+            elif data[0] == 10.0:
+                self.network_send("state", np.hstack((self.quadcopter.global_pos, self.quadcopter.body_theta)))
+                print(BLUE + "[Net] Received GET_STATE Command." + RESET)
+            elif data[0] == 11.0:
+                self.network_send("rgb", self.img_rgb)
+                print(BLUE + "[Net] Received GET_RGB_IMAGE Command, shape: {}.".format(self.img_rgb.shape) + RESET)
+            elif data[0] == 12.0:
+                self.network_send("depth", self.img_depth)
+                print(BLUE + "[Net] Received GET_DEPTH_IMAGE Command, shape: {}.".format(self.img_depth.shape) + RESET)
 
     def sim_task(self, task):
         # ### god view ### #
@@ -386,8 +432,10 @@ class RNSim(DirectObject):
 
         # ### render image sensor ### #
         self.update_aero_fpv_camera()
-        img_rgb = self.get_aero_fpv_image_rgb(self.aero_buffer_rgb)
-        img_depth = self.get_aero_fpv_image_depth(self.aero_buffer_depth)
+        self.img_rgb = self.get_aero_fpv_image_rgb(self.aero_buffer_rgb)
+        self.img_depth = self.get_aero_fpv_image_depth(self.aero_buffer_depth)
+        img_rgb = self.img_rgb
+        img_depth = self.img_depth
 
         # ### show image (optional) ### #
         if img_rgb.size != 0 and self.flag_image_rgb:
