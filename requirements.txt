@@ -1,5 +1,5 @@
 imutils==0.5.2
 matplotlib==2.2.2
-numpy==1.13.1
+numpy==1.21.0
 panda3d==1.10.5
 Pillow==7.1.0
